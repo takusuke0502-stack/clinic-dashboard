@@ -1,0 +1,1046 @@
+import React, { useState, useMemo, useEffect } from 'react';
+import { Activity, Users, TrendingUp, DollarSign, Calendar, PlusCircle, Trash2, MapPin, Target, Bot, Copy, Check, Info, ChevronLeft, ChevronRight, Save, ArrowRight, MousePointerClick, BarChart3, Download, Search, Cloud, RefreshCw, FileText, AlertTriangle, X, BookOpen, Settings, PiggyBank, Zap, CreditCard } from 'lucide-react';
+
+// ==========================================
+// ▼ GAS連携設定
+// プレビュー環境でのエラーを防ぐため、安全な形に修正しました
+// ==========================================
+const GAS_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbyR0un7hVklhjWIWlNTiAZYpH9t0JzTmOih3QMO1T7B_3VYBE3K-cnqXWV6w1k0kTlZRw/exec"; 
+const APP_SECRET_TOKEN = "seitai_secure_token_2026";
+
+const TOWN_LIST = [
+  "あけぼの", "明原", "末広町", "旭町", "柏", "中央", "中央町", "千代田", "泉町", "若葉町", "桜台",
+  "篠籠田", "豊四季", "豊四季台", "十余二", "高田", "松ヶ崎", "松葉町", "南柏", "流山市", "我孫子市", "松戸市"
+];
+
+const SYMPTOM_LIST = [
+  "膝痛", "変形性膝関節症", "椎間板ヘルニア", "腰痛", "坐骨神経痛", "脊柱管狭窄症", "肩こり・頭痛", "股関節痛", "その他"
+];
+
+const SEO_KEYWORDS = [
+  "柏 整体", "柏 膝痛", "柏 整体 おすすめ", "柏 膝痛 股関節", "柏 整体 足首", "慢性腰痛 膝の痛み"
+];
+
+const PLAN_LIST = [
+  { name: "未購入/保留", price: 0, unitPrice: 0, isTicket: false },
+  { name: "都度(特別) 6,000円", price: 6000, unitPrice: 6000, isTicket: false },
+  { name: "都度 10,000円", price: 10000, unitPrice: 10000, isTicket: false },
+  { name: "10回券 90,000円", price: 90000, unitPrice: 9000, isTicket: true },
+  { name: "15回券 135,000円", price: 135000, unitPrice: 9000, isTicket: true },
+  { name: "20回券 176,000円", price: 176000, unitPrice: 8800, isTicket: true },
+  { name: "30回券 255,000円", price: 255000, unitPrice: 8500, isTicket: true }
+];
+
+const AVERAGE_EXISTING_UNIT_PRICE = 8500;
+const AGE_GROUP_LIST = ["10代以下", "20代", "30代", "40代", "50代", "60代", "70代", "80代以上"];
+const FEE_RATES = { card: 0.025, paypay: 0.0198 };
+
+export default function App() {
+  const [activeTab, setActiveTab] = useState('daily');
+  const [copied, setCopied] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncStatus, setSyncStatus] = useState(null); 
+  
+  const [showResetModal, setShowResetModal] = useState(false);
+  const [resetType, setResetType] = useState('daily'); 
+  const [resetInput, setResetInput] = useState("");
+  const [promptType, setPromptType] = useState('marketing'); 
+
+  const [currentMonth, setCurrentMonth] = useState(() => {
+    const today = new Date();
+    today.setMinutes(today.getMinutes() - today.getTimezoneOffset());
+    return today.toISOString().substring(0, 7);
+  });
+
+  const [selectedDate, setSelectedDate] = useState(() => {
+    const today = new Date();
+    today.setMinutes(today.getMinutes() - today.getTimezoneOffset());
+    return today.toISOString().split('T')[0];
+  });
+
+  const [term, setTerm] = useState(() => localStorage.getItem('seitai_term') || "1");
+  useEffect(() => { localStorage.setItem('seitai_term', term); }, [term]);
+
+  const [gasReport, setGasReport] = useState(() => localStorage.getItem('seitai_gas_report') || "");
+  useEffect(() => { localStorage.setItem('seitai_gas_report', gasReport); }, [gasReport]);
+
+  const [records, setRecords] = useState(() => {
+    const savedRecords = localStorage.getItem('seitai_records_v25');
+    if (savedRecords) return JSON.parse(savedRecords);
+    const oldRecords = localStorage.getItem('seitai_records_v24');
+    if (oldRecords) return JSON.parse(oldRecords);
+    
+    // デモデータ（初期状態）
+    return [
+      { 
+        id: 1, date: '2026-02-02', slots: 15, existingPatients: 10, dropouts: 0, 
+        salesCash: 10000, salesCard: 90000, salesPayPay: 0, fee: 2250,
+        newPatients: [
+          { id: 101, chartNo: '001', ageGroup: '40代', visitCount: 1, symptom: '腰痛', media: 'HP', searchKeyword: '柏 整体 おすすめ', town: 'あけぼの', plan: '10回券 90,000円', paymentMethod: 'card' },
+          { id: 102, chartNo: '002', ageGroup: '20代', visitCount: 1, symptom: '肩こり・頭痛', media: 'MEO', searchKeyword: '柏 整体', town: '明原', plan: '都度 10,000円', paymentMethod: 'cash' }
+        ], 
+        existingDetails: [] 
+      }
+    ];
+  });
+
+  useEffect(() => { localStorage.setItem('seitai_records_v25', JSON.stringify(records)); }, [records]);
+
+  const [marketingData, setMarketingData] = useState(() => {
+    const saved = localStorage.getItem('seitai_marketing_v25');
+    if (saved) return JSON.parse(saved);
+    const oldSaved = localStorage.getItem('seitai_marketing_v24');
+    if (oldSaved) return JSON.parse(oldSaved);
+    return {};
+  });
+
+  useEffect(() => { localStorage.setItem('seitai_marketing_v25', JSON.stringify(marketingData)); }, [marketingData]);
+
+  // --- 堅牢なGAS連携 ---
+  const syncToGAS = async (dataToSync) => {
+    if (!GAS_WEB_APP_URL) return; 
+    setIsSyncing(true);
+    setSyncStatus(null);
+    try {
+      const payload = { token: APP_SECRET_TOKEN, data: dataToSync };
+      const response = await fetch(GAS_WEB_APP_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' },
+        body: JSON.stringify(payload),
+      });
+      const result = await response.json();
+      if (result.status === 'success') {
+        setSyncStatus('success');
+      } else {
+        throw new Error(result.message || 'Unknown GAS Error');
+      }
+    } catch (e) {
+      console.error('GAS同期エラー:', e);
+      setSyncStatus('error');
+    } finally {
+      setIsSyncing(false);
+      setTimeout(() => setSyncStatus(null), 3000);
+    }
+  };
+
+  const loadFromGAS = async () => {
+    if (!GAS_WEB_APP_URL) return alert('GASのURLが設定されていません。');
+    setIsSyncing(true);
+    try {
+      const res = await fetch(`${GAS_WEB_APP_URL}?token=${APP_SECRET_TOKEN}`, { method: 'GET' });
+      if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+      const data = await res.json();
+      if (data.records && data.records.length > 0) {
+        setRecords(data.records);
+        alert('クラウドからデータを読み込みました。');
+      } else {
+        alert('クラウド上に保存されたデータがありません。');
+      }
+      if (data.marketingData) setMarketingData(data.marketingData);
+    } catch (e) {
+      console.error('GAS読込エラー:', e);
+      alert('読み込みに失敗しました。');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const currentMarketing = marketingData[currentMonth] || {
+    hpAccess: 0, meoAction: 0, 
+    adSpend: { 'チラシ': 0, 'HP': 0, 'MEO': 0, '紹介': 0, 'その他': 0 },
+    expenses: { rent: 0, creditCard: 0, others: 0 } 
+  };
+
+  const updateMarketingData = (field, value, subField = null) => {
+    setMarketingData(prev => {
+      const monthData = prev[currentMonth] || { hpAccess: 0, meoAction: 0, adSpend: { 'チラシ': 0, 'HP': 0, 'MEO': 0, '紹介': 0, 'その他': 0 }, expenses: { rent: 0, creditCard: 0, others: 0 }};
+      let updatedData = { ...prev };
+      if (subField) updatedData[currentMonth] = { ...monthData, [field]: { ...monthData[field], [subField]: Number(value) } };
+      else updatedData[currentMonth] = { ...monthData, [field]: Number(value) };
+      syncToGAS({ records, marketingData: updatedData });
+      return updatedData;
+    });
+  };
+
+  const [formData, setFormData] = useState({ slots: 10, existingPatients: 0, salesCash: 0, salesCard: 0, salesPayPay: 0, fee: 0, dropouts: 0 });
+  const [newPatientsList, setNewPatientsList] = useState([]);
+  const [existingPatientsList, setExistingPatientsList] = useState([]);
+
+  useEffect(() => {
+    const existingRecord = records.find(r => r.date === selectedDate);
+    if (existingRecord) {
+      setFormData({ 
+        slots: existingRecord.slots, existingPatients: existingRecord.existingPatients, 
+        salesCash: existingRecord.salesCash || 0, salesCard: existingRecord.salesCard || 0, salesPayPay: existingRecord.salesPayPay || 0,
+        fee: existingRecord.fee || 0, dropouts: existingRecord.dropouts || 0 
+      });
+      setNewPatientsList(existingRecord.newPatients || []);
+      setExistingPatientsList(existingRecord.existingDetails || []);
+    } else {
+      setFormData({ slots: 10, existingPatients: 0, salesCash: 0, salesCard: 0, salesPayPay: 0, fee: 0, dropouts: 0 });
+      setNewPatientsList([]);
+      setExistingPatientsList([]);
+    }
+  }, [selectedDate, records]);
+
+  const patientMaster = useMemo(() => {
+    const master = {}; 
+    records.forEach(r => {
+      (r.newPatients || []).forEach(np => {
+        if (np.chartNo && np.chartNo.trim() !== '') master[np.chartNo] = { ageGroup: np.ageGroup, visitCount: np.visitCount };
+      });
+      (r.existingDetails || []).forEach(ep => {
+        if (ep.chartNo && ep.chartNo.trim() !== '') master[ep.chartNo] = { ageGroup: ep.ageGroup, visitCount: ep.visitCount };
+      });
+    });
+    return Object.entries(master).map(([chartNo, data]) => ({ chartNo, ...data }));
+  }, [records]);
+
+  const filteredRecords = useMemo(() => records.filter(r => r.date.startsWith(currentMonth)), [records, currentMonth]);
+
+  const kpis = useMemo(() => {
+    let totalSlots = 0, totalExisting = 0, totalNew = 0, totalContracts = 0, existingContracts = 0, totalDropouts = 0; 
+    let totalSales = 0, totalSalesCash = 0, totalSalesCard = 0, totalSalesPayPay = 0, totalFee = 0;
+    let totalTicketSales = 0, totalDigestedSales = 0; 
+
+    const mediaStats = { 'チラシ': { count: 0, contracts: 0 }, 'HP': { count: 0, contracts: 0 }, 'MEO': { count: 0, contracts: 0 }, '紹介': { count: 0, contracts: 0 }, 'その他': { count: 0, contracts: 0 } };
+    const townStats = {}; const symptomStats = {}; const keywordStats = {}; const ageGroupStats = {};
+    const planStats = {}; const existingPlanStats = {}; 
+    
+    PLAN_LIST.forEach(p => { if (p.name !== "未購入/保留") { planStats[p.name] = 0; existingPlanStats[p.name] = 0; } });
+
+    filteredRecords.forEach(r => {
+      totalSlots += Number(r.slots); totalExisting += Number(r.existingPatients); totalDropouts += Number(r.dropouts || 0);
+      const cash = Number(r.salesCash || 0); const card = Number(r.salesCard || 0); const paypay = Number(r.salesPayPay || 0); const fee = Number(r.fee || 0);
+      
+      totalSalesCash += cash; totalSalesCard += card; totalSalesPayPay += paypay; totalFee += fee;
+      totalSales += (cash + card + paypay);
+      totalDigestedSales += Number(r.existingPatients) * AVERAGE_EXISTING_UNIT_PRICE;
+      
+      (r.newPatients || []).forEach(np => {
+        const planInfo = PLAN_LIST.find(p => p.name === np.plan);
+        const isContracted = planInfo ? planInfo.isTicket : false;
+        if (planInfo) {
+          if (isContracted) totalTicketSales += planInfo.price;
+          totalDigestedSales += planInfo.unitPrice; 
+        }
+        if (isContracted) totalContracts += 1;
+        if (np.plan && np.plan !== "未購入/保留" && planStats[np.plan] !== undefined) planStats[np.plan] += 1;
+        if (mediaStats[np.media]) { mediaStats[np.media].count += 1; if (isContracted) mediaStats[np.media].contracts += 1; }
+        
+        const town = np.town || '未入力';
+        if (!townStats[town]) townStats[town] = { count: 0, contracts: 0 };
+        townStats[town].count += 1; if (isContracted) townStats[town].contracts += 1;
+
+        const symptom = np.symptom || '未入力';
+        if (!symptomStats[symptom]) symptomStats[symptom] = { count: 0, contracts: 0 };
+        symptomStats[symptom].count += 1; if (isContracted) symptomStats[symptom].contracts += 1;
+
+        if (np.searchKeyword && np.searchKeyword.trim() !== '') {
+          const kw = np.searchKeyword.trim();
+          if (!keywordStats[kw]) keywordStats[kw] = { count: 0, contracts: 0 };
+          keywordStats[kw].count += 1; if (isContracted) keywordStats[kw].contracts += 1;
+        }
+        const age = np.ageGroup || '年代不明';
+        if (!ageGroupStats[age]) ageGroupStats[age] = { count: 0, contracts: 0 };
+        ageGroupStats[age].count += 1; if (isContracted) ageGroupStats[age].contracts += 1;
+      });
+
+      (r.existingDetails || []).forEach(ep => {
+        const planInfo = PLAN_LIST.find(p => p.name === ep.plan);
+        if (planInfo && planInfo.isTicket) { existingContracts += 1; totalTicketSales += planInfo.price; }
+        if (ep.plan && existingPlanStats[ep.plan] !== undefined) existingPlanStats[ep.plan] += 1;
+      });
+    });
+
+    const totalPatients = totalNew + totalExisting;
+    const occupancyRate = totalSlots > 0 ? (totalPatients / totalSlots) * 100 : 0;
+    const contractRate = totalNew > 0 ? (totalContracts / totalNew) * 100 : 0;
+    const averageSpend = totalPatients > 0 ? totalSales / totalPatients : 0;
+
+    return { 
+      totalSales, totalSalesCash, totalSalesCard, totalSalesPayPay, totalFee, totalTicketSales, totalDigestedSales,
+      totalPatients, totalNew, totalExisting, totalSlots, totalContracts, existingContracts, totalDropouts,
+      occupancyRate: occupancyRate.toFixed(1), contractRate: contractRate.toFixed(1), averageSpend: Math.round(averageSpend),
+      mediaStats, townStats, symptomStats, keywordStats, ageGroupStats, planStats, existingPlanStats
+    };
+  }, [filteredRecords]);
+
+  // --- MFクラウド仕訳CSVエクスポート ---
+  const exportMoneyForwardCSV = () => {
+    if (filteredRecords.length === 0) return alert("この月のデータはありません。");
+    
+    // MFクラウド確定申告 振替伝票フォーマット
+    const headers = ['取引日', '借方勘定科目', '借方金額', '貸方勘定科目', '貸方金額', '摘要'];
+    const rows = [];
+
+    filteredRecords.slice().sort((a, b) => new Date(a.date) - new Date(b.date)).forEach(r => {
+      const date = r.date.replace(/-/g, '/');
+      if (r.salesCash > 0) rows.push([date, '現金', r.salesCash, '売上高', r.salesCash, '店舗現金売上']);
+      if (r.salesCard > 0) rows.push([date, '未収入金', r.salesCard, '売上高', r.salesCard, 'クレジットカード決済売上']);
+      if (r.salesPayPay > 0) rows.push([date, '未収入金', r.salesPayPay, '売上高', r.salesPayPay, 'PayPay決済売上']);
+      if (r.fee > 0) rows.push([date, '支払手数料', r.fee, '未収入金', r.fee, 'キャッシュレス決済手数料']);
+    });
+
+    const endOfMonth = new Date(currentMonth.split('-')[0], currentMonth.split('-')[1], 0).toISOString().split('T')[0].replace(/-/g, '/');
+    if (kpis.totalTicketSales > 0) {
+      rows.push([endOfMonth, '売上高', kpis.totalTicketSales, '前受金', kpis.totalTicketSales, '当月回数券販売分振替']);
+    }
+    if (kpis.totalDigestedSales > 0) {
+      rows.push([endOfMonth, '前受金', kpis.totalDigestedSales, '売上高', kpis.totalDigestedSales, '当月回数券消化分売上計上']);
+    }
+
+    const csvContent = [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
+    const blob = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), csvContent], { type: 'text/csv;charset=utf-8;' });
+    const filename = `MF仕訳_${currentMonth.replace('-', '')}_整体院.csv`;
+    const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = filename;
+    document.body.appendChild(link); link.click(); document.body.removeChild(link);
+  };
+
+  const handleInputChange = (e) => setFormData(prev => ({ ...prev, [e.target.name]: e.target.value }));
+
+  const changeDate = (offset) => {
+    const dateObj = new Date(selectedDate); dateObj.setDate(dateObj.getDate() + offset);
+    const newDateStr = dateObj.toISOString().split('T')[0];
+    setSelectedDate(newDateStr);
+    if (newDateStr.substring(0, 7) !== currentMonth) setCurrentMonth(newDateStr.substring(0, 7));
+  };
+
+  const handleDateChange = (e) => {
+    const newDateStr = e.target.value;
+    setSelectedDate(newDateStr);
+    if (newDateStr.substring(0, 7) !== currentMonth) setCurrentMonth(newDateStr.substring(0, 7));
+  };
+
+  const jumpToToday = () => {
+    const today = new Date();
+    today.setMinutes(today.getMinutes() - today.getTimezoneOffset());
+    const todayStr = today.toISOString().split('T')[0];
+    setSelectedDate(todayStr);
+    if (currentMonth !== todayStr.substring(0, 7)) setCurrentMonth(todayStr.substring(0, 7));
+  };
+
+  const jumpToDate = (dateStr) => { setSelectedDate(dateStr); setActiveTab('daily'); window.scrollTo({ top: 0, behavior: 'smooth' }); };
+
+  const recalculateSales = (newList, existingList) => {
+    let cash = 0; let card = 0; let paypay = 0;
+    const calcPrice = (planName) => { const plan = PLAN_LIST.find(p => p.name === planName); return plan ? plan.price : 0; };
+    const addSales = (p) => {
+      const price = calcPrice(p.plan);
+      if (p.paymentMethod === 'card') card += price;
+      else if (p.paymentMethod === 'paypay') paypay += price;
+      else cash += price;
+    };
+    newList.forEach(addSales); existingList.forEach(addSales);
+    const fee = Math.floor(card * FEE_RATES.card) + Math.floor(paypay * FEE_RATES.paypay);
+    setFormData(prev => ({ ...prev, salesCash: cash, salesCard: card, salesPayPay: paypay, fee }));
+  };
+
+  const handlePaymentChange = (e) => {
+    const { name, value } = e.target;
+    const numValue = Number(value) || 0;
+    setFormData(prev => {
+      const next = { ...prev, [name]: numValue };
+      if (name === 'salesCard' || name === 'salesPayPay') {
+        const cardFee = Math.floor(next.salesCard * FEE_RATES.card);
+        const paypayFee = Math.floor(next.salesPayPay * FEE_RATES.paypay);
+        next.fee = cardFee + paypayFee;
+      }
+      return next;
+    });
+  };
+
+  const addNewPatientField = () => {
+    const newList = [...newPatientsList, { id: Date.now(), chartNo: '', ageGroup: '40代', visitCount: 1, symptom: '腰痛', media: 'チラシ', searchKeyword: '', town: '', plan: '未購入/保留', paymentMethod: 'cash' }];
+    setNewPatientsList(newList); recalculateSales(newList, existingPatientsList);
+  };
+  
+  const updateNewPatient = (id, field, value) => {
+    const newList = newPatientsList.map(p => p.id === id ? { ...p, [field]: value } : p);
+    setNewPatientsList(newList);
+    if (field === 'plan' || field === 'paymentMethod') recalculateSales(newList, existingPatientsList);
+  };
+  
+  const removeNewPatient = (id) => {
+    const newList = newPatientsList.filter(p => p.id !== id);
+    setNewPatientsList(newList); recalculateSales(newList, existingPatientsList);
+  };
+
+  const addExistingPatientField = () => {
+    const newList = [...existingPatientsList, { id: Date.now(), chartNo: '', ageGroup: '40代', visitCount: 2, plan: '都度 10,000円', paymentMethod: 'cash' }];
+    setExistingPatientsList(newList); recalculateSales(newPatientsList, newList);
+  };
+
+  const addQuickExistingPatient = () => {
+    const newList = [...existingPatientsList, { id: Date.now(), chartNo: '', ageGroup: '40代', visitCount: 2, plan: '都度 10,000円', paymentMethod: 'cash' }];
+    setExistingPatientsList(newList); recalculateSales(newPatientsList, newList);
+  };
+  
+  const updateExistingPatient = (id, field, value) => {
+    const newList = existingPatientsList.map(p => p.id === id ? { ...p, [field]: value } : p);
+    setExistingPatientsList(newList);
+    if (field === 'plan' || field === 'paymentMethod') recalculateSales(newPatientsList, newList);
+  };
+
+  const handleExistingChartNoChange = (id, value) => {
+    const newList = existingPatientsList.map(p => {
+      if (p.id === id) {
+        const updated = { ...p, chartNo: value };
+        const found = patientMaster.find(m => m.chartNo === value);
+        if (found) {
+          updated.ageGroup = found.ageGroup || '40代';
+          updated.visitCount = (Number(found.visitCount) || 1) + 1; 
+        }
+        return updated;
+      }
+      return p;
+    });
+    setExistingPatientsList(newList); recalculateSales(newPatientsList, newList);
+  };
+  
+  const removeExistingPatient = (id) => {
+    const newList = existingPatientsList.filter(p => p.id !== id);
+    setExistingPatientsList(newList); recalculateSales(newPatientsList, newList);
+  };
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    const existingRecordId = records.find(r => r.date === selectedDate)?.id;
+    const newRecord = {
+      id: existingRecordId || Date.now(), date: selectedDate, slots: Number(formData.slots),
+      existingPatients: Number(formData.existingPatients), salesCash: Number(formData.salesCash),
+      salesCard: Number(formData.salesCard), salesPayPay: Number(formData.salesPayPay),
+      fee: Number(formData.fee), dropouts: Number(formData.dropouts || 0),
+      newPatients: [...newPatientsList], existingDetails: [...existingPatientsList]
+    };
+    
+    const updatedRecords = records.filter(r => r.date !== selectedDate);
+    updatedRecords.push(newRecord);
+    updatedRecords.sort((a, b) => new Date(a.date) - new Date(b.date));
+    
+    setRecords(updatedRecords);
+    syncToGAS({ records: updatedRecords, marketingData });
+
+    setSaveSuccess(true); setTimeout(() => setSaveSuccess(false), 2000);
+  };
+
+  const handleResetExecute = () => {
+    if (resetInput !== '削除') return;
+
+    let updatedRecords = [...records];
+    let updatedMarketing = { ...marketingData };
+    let alertMessage = "";
+
+    if (resetType === 'daily') {
+      updatedRecords = updatedRecords.filter(r => r.date !== selectedDate);
+      setRecords(updatedRecords);
+      alertMessage = `${selectedDate} のデータを削除しました。`;
+    } else if (resetType === 'monthly') {
+      updatedRecords = updatedRecords.filter(r => !r.date.startsWith(currentMonth));
+      setRecords(updatedRecords);
+      delete updatedMarketing[currentMonth];
+      setMarketingData(updatedMarketing);
+      alertMessage = `${currentMonth} 月のデータをすべて削除しました。`;
+    } else if (resetType === 'all') {
+      updatedRecords = [];
+      updatedMarketing = {};
+      setRecords([]);
+      setMarketingData({});
+      setGasReport("");
+      setTerm("1");
+      
+      localStorage.clear(); // 強制リセット
+      alertMessage = "すべてのデータを完全に削除し、初期状態にリセットしました。";
+    }
+
+    setFormData({ slots: 10, existingPatients: 0, salesCash: 0, salesCard: 0, salesPayPay: 0, fee: 0, dropouts: 0 });
+    setNewPatientsList([]);
+    setExistingPatientsList([]);
+    syncToGAS({ records: updatedRecords, marketingData: updatedMarketing });
+    setShowResetModal(false);
+    setResetInput("");
+    setResetType('daily');
+    alert(alertMessage);
+  };
+
+  // --- UI レンダリング ---
+  const renderTabNav = () => (
+    <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6 gap-4 border-b pb-4">
+      <div className="flex overflow-x-auto bg-white rounded-xl shadow-sm border border-gray-100 p-2 gap-2 hide-scrollbar">
+        {[
+          { id: 'daily', label: '日次入力', icon: PlusCircle },
+          { id: 'monthly', label: '月次サマリー', icon: Activity },
+          { id: 'marketing', label: '広告費・経費入力', icon: CreditCard }, 
+          { id: 'ai', label: 'AI分析へ送る', icon: Bot },
+          { id: 'help', label: '使い方ガイド', icon: BookOpen },
+        ].map(tab => (
+          <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex items-center gap-2 px-4 py-3 rounded-lg font-bold text-sm transition whitespace-nowrap ${activeTab === tab.id ? 'bg-teal-700 text-white shadow-md' : 'text-gray-600 hover:bg-teal-50 hover:text-teal-800'}`}>
+            <tab.icon className="w-5 h-5" /> {tab.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3 bg-white p-2 rounded-xl shadow-sm border border-gray-100">
+        {GAS_WEB_APP_URL && (
+          <button onClick={loadFromGAS} disabled={isSyncing} className="flex items-center gap-1.5 bg-blue-50 text-blue-700 hover:bg-blue-100 px-3 py-2 rounded-lg font-bold text-xs transition border border-blue-200">
+            {isSyncing ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Cloud className="w-4 h-4" />} クラウド読込
+          </button>
+        )}
+        <div className="flex items-center gap-2 bg-gray-50 px-3 py-2 rounded-lg border border-gray-200">
+          <label className="text-sm font-bold text-gray-600 whitespace-nowrap">対象月:</label>
+          <input type="month" value={currentMonth} onChange={(e) => { setCurrentMonth(e.target.value); setSelectedDate(`${e.target.value}-01`); }} className="border-none bg-transparent outline-none font-bold text-gray-800" />
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderDailyTab = () => {
+    const currentRecord = records.find(r => r.date === selectedDate);
+    const isExistingRecord = !!currentRecord;
+    const totalDaily = currentRecord ? (currentRecord.newPatients?.length || 0) + currentRecord.existingPatients : 0;
+    const currentTotalSales = Number(formData.salesCash) + Number(formData.salesCard) + Number(formData.salesPayPay);
+
+    return (
+      <div className="space-y-6 animate-fade-in">
+        <div className="flex items-center justify-center bg-white p-3 sm:p-4 rounded-xl shadow-sm border border-gray-100 gap-2 sm:gap-4 relative">
+          <button onClick={() => changeDate(-1)} className="p-3 bg-gray-50 hover:bg-teal-50 rounded-lg font-bold flex items-center gap-1 transition text-gray-600"><ChevronLeft className="w-5 h-5 sm:w-4 sm:h-4" /> <span className="hidden sm:inline text-sm">前日</span></button>
+          <div className="flex items-center gap-1 sm:gap-2 bg-teal-50/50 px-3 sm:px-4 py-2 rounded-lg border border-teal-200 shadow-inner flex-1 max-w-[200px] justify-center">
+            <Calendar className="w-4 h-4 text-teal-600 hidden sm:block" />
+            <input type="date" value={selectedDate} onChange={handleDateChange} className="font-black text-teal-800 text-base sm:text-lg bg-transparent outline-none cursor-pointer w-full text-center" />
+          </div>
+          <button onClick={() => changeDate(1)} className="p-3 bg-gray-50 hover:bg-teal-50 rounded-lg font-bold flex items-center gap-1 transition text-gray-600"><span className="hidden sm:inline text-sm">翌日</span> <ChevronRight className="w-5 h-5 sm:w-4 sm:h-4" /></button>
+          <button onClick={jumpToToday} className="absolute right-2 sm:static ml-1 sm:ml-2 px-4 py-3 sm:py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-lg text-xs font-bold transition shadow-sm whitespace-nowrap">今日</button>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          <div className="lg:col-span-7 bg-white p-6 rounded-xl shadow-sm border border-gray-100 h-fit">
+            <div className="flex justify-between items-center border-b pb-3 mb-4">
+              <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2">データの入力・編集</h2>
+              {isSyncing && <span className="text-xs font-bold text-blue-600 flex items-center gap-1"><RefreshCw className="w-3 h-3 animate-spin"/> {syncStatus === 'success' ? '保存完了' : 'クラウド保存中'}</span>}
+              {!isSyncing && syncStatus === 'success' && <span className="text-xs font-bold text-emerald-600 flex items-center gap-1"><Check className="w-3 h-3"/> クラウド保存済</span>}
+            </div>
+
+            <form onSubmit={handleSubmit} className="space-y-5">
+              <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 space-y-4">
+                <div className="grid grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-1">総予約枠数</label>
+                    <input type="number" name="slots" min="0" value={formData.slots} onChange={handleInputChange} required className="w-full p-3 border border-gray-300 rounded-md outline-none focus:ring-2 focus:ring-teal-500 bg-white" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-1">既存の来院</label>
+                    <input type="number" name="existingPatients" min="0" value={formData.existingPatients} onChange={handleInputChange} required className="w-full p-3 border border-gray-300 rounded-md outline-none focus:ring-2 focus:ring-teal-500 bg-white" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-red-600 mb-1">離脱者 (中断等)</label>
+                    <input type="number" name="dropouts" min="0" value={formData.dropouts} onChange={handleInputChange} className="w-full p-3 border border-red-300 rounded-md outline-none focus:ring-2 focus:ring-red-500 bg-red-50" placeholder="0" />
+                  </div>
+                </div>
+
+                <div className="border-t border-gray-200 pt-4">
+                  <label className="block text-sm font-bold text-gray-700 mb-2">本日の売上・決済内訳</label>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div>
+                      <label className="block text-xs font-bold text-gray-600 mb-1">現金売上 <span className="text-[10px] font-normal text-teal-600 bg-teal-50 px-1 py-0.5 rounded">自動計算</span></label>
+                      <input type="number" name="salesCash" min="0" value={formData.salesCash} onChange={handlePaymentChange} className="w-full p-3 text-sm font-bold border border-gray-300 rounded-md outline-none focus:ring-2 focus:ring-teal-500 text-right bg-white" placeholder="0" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-gray-600 mb-1">カード売上 <span className="text-[9px] font-normal text-gray-500">2.5%</span></label>
+                      <input type="number" name="salesCard" min="0" value={formData.salesCard} onChange={handlePaymentChange} className="w-full p-3 text-sm font-bold border border-gray-300 rounded-md outline-none focus:ring-2 focus:ring-teal-500 text-right bg-white" placeholder="0" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-gray-600 mb-1">PayPay売上 <span className="text-[9px] font-normal text-gray-500">1.98%</span></label>
+                      <input type="number" name="salesPayPay" min="0" value={formData.salesPayPay} onChange={handlePaymentChange} className="w-full p-3 text-sm font-bold border border-gray-300 rounded-md outline-none focus:ring-2 focus:ring-teal-500 text-right bg-white" placeholder="0" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-red-600 mb-1">決済手数料 <span className="text-[10px] font-normal text-red-500 bg-red-50 px-1 py-0.5 rounded">自動</span></label>
+                      <input type="number" name="fee" min="0" value={formData.fee} onChange={handlePaymentChange} className="w-full p-3 text-sm font-bold border border-red-300 rounded-md outline-none focus:ring-2 focus:ring-red-500 text-right bg-red-50 text-red-700" placeholder="0" />
+                    </div>
+                  </div>
+                  <div className="mt-3 bg-blue-50 p-3 rounded-lg flex justify-between items-center border border-blue-100">
+                    <div className="text-sm font-bold text-gray-600">合計売上: ¥{currentTotalSales.toLocaleString()}</div>
+                    <div className="text-lg font-black text-blue-800">純利益: ¥{(currentTotalSales - formData.fee).toLocaleString()}</div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-teal-50/50 p-4 rounded-lg border border-teal-100">
+                <div className="flex items-center justify-between mb-3">
+                  <label className="block text-sm font-bold text-teal-800">新規患者のトラッキング</label>
+                  <button type="button" onClick={addNewPatientField} className="text-xs bg-teal-600 text-white px-4 py-2 rounded-md hover:bg-teal-700 flex items-center gap-1 font-bold shadow-sm"><PlusCircle className="w-3 h-3" /> 新規を追加</button>
+                </div>
+                {newPatientsList.map((p, index) => (
+                  <div key={p.id} className="bg-white p-4 rounded-xl border border-teal-300 shadow-sm flex flex-col gap-3 mb-4">
+                    <div className="flex justify-between items-center border-b border-teal-100 pb-2">
+                      <span className="font-bold text-teal-800 flex items-center gap-1"><Users className="w-4 h-4"/> 新規 {index + 1}</span>
+                      <button type="button" onClick={() => removeNewPatient(p.id)} className="text-red-400 hover:text-red-600 bg-red-50 p-2 rounded-md"><Trash2 className="w-4 h-4" /></button>
+                    </div>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                      <div className="col-span-1">
+                        <label className="text-[10px] text-gray-500 block mb-0.5">カルテNo (必須)</label>
+                        <input type="text" value={p.chartNo || ''} onChange={(e) => updateNewPatient(p.id, 'chartNo', e.target.value)} className="w-full p-3 text-sm border rounded focus:border-teal-500 bg-gray-50" />
+                      </div>
+                      <div className="col-span-1">
+                        <label className="text-[10px] text-gray-500 block mb-0.5">年代</label>
+                        <select value={p.ageGroup} onChange={(e) => updateNewPatient(p.id, 'ageGroup', e.target.value)} className="w-full p-3 text-sm border rounded focus:border-teal-500 bg-gray-50">
+                          {AGE_GROUP_LIST.map(age => <option key={age} value={age}>{age}</option>)}
+                        </select>
+                      </div>
+                      <div className="col-span-1">
+                        <label className="text-[10px] text-gray-500 block mb-0.5">症状</label>
+                        <select value={p.symptom} onChange={(e) => updateNewPatient(p.id, 'symptom', e.target.value)} className="w-full p-3 text-sm border rounded focus:border-teal-500 bg-gray-50">
+                          {SYMPTOM_LIST.map(sym => <option key={sym} value={sym}>{sym}</option>)}
+                        </select>
+                      </div>
+                      <div className="col-span-1">
+                        <label className="text-[10px] text-gray-500 block mb-0.5">媒体</label>
+                        <select value={p.media} onChange={(e) => updateNewPatient(p.id, 'media', e.target.value)} className="w-full p-3 text-sm border rounded focus:border-teal-500 bg-gray-50">
+                          <option value="チラシ">チラシ</option><option value="HP">HP</option><option value="MEO">MEO</option><option value="紹介">紹介</option>
+                        </select>
+                      </div>
+                      <div className="col-span-2">
+                        <label className="text-[10px] text-gray-500 block mb-0.5">購入プラン</label>
+                        <select value={p.plan} onChange={(e) => updateNewPatient(p.id, 'plan', e.target.value)} className="w-full p-3 text-sm border rounded focus:border-teal-500 font-bold bg-gray-50">
+                          {PLAN_LIST.map(plan => <option key={plan.name} value={plan.name}>{plan.name}</option>)}
+                        </select>
+                      </div>
+                      <div className="col-span-2">
+                        <label className="text-[10px] text-teal-600 font-bold block mb-0.5">決済方法 (自動計算)</label>
+                        <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-md h-[44px]">
+                          <button type="button" onClick={() => updateNewPatient(p.id, 'paymentMethod', 'cash')} className={`flex-1 h-full text-xs font-bold rounded ${p.paymentMethod === 'cash' ? 'bg-white shadow text-teal-800' : 'text-gray-500'}`}>現金</button>
+                          <button type="button" onClick={() => updateNewPatient(p.id, 'paymentMethod', 'card')} className={`flex-1 h-full text-xs font-bold rounded ${p.paymentMethod === 'card' ? 'bg-white shadow text-teal-800' : 'text-gray-500'}`}>カード</button>
+                          <button type="button" onClick={() => updateNewPatient(p.id, 'paymentMethod', 'paypay')} className={`flex-1 h-full text-xs font-bold rounded ${p.paymentMethod === 'paypay' ? 'bg-white shadow text-teal-800' : 'text-gray-500'}`}>PayPay</button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="bg-blue-50/50 p-4 rounded-lg border border-blue-100">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-3 gap-2">
+                  <label className="block text-sm font-bold text-blue-800">既存患者の購入</label>
+                  <div className="flex gap-2">
+                    <button type="button" onClick={addQuickExistingPatient} className="text-xs bg-white border border-blue-200 text-blue-700 px-3 py-2 rounded-md hover:bg-blue-50 flex items-center gap-1 font-bold shadow-sm"><Zap className="w-3 h-3" /> ⚡️ クイック(都度/現金)</button>
+                    <button type="button" onClick={addExistingPatientField} className="text-xs bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 flex items-center gap-1 font-bold shadow-sm"><PlusCircle className="w-3 h-3" /> 詳細追加</button>
+                  </div>
+                </div>
+                {existingPatientsList.map((p, index) => (
+                  <div key={p.id} className="bg-white p-4 rounded-xl border border-blue-300 shadow-sm flex flex-col gap-3 mb-4">
+                    <div className="flex justify-between items-center border-b border-blue-100 pb-2">
+                      <span className="font-bold text-blue-800 flex items-center gap-1"><Users className="w-4 h-4"/> 既存購入 {index + 1}</span>
+                      <button type="button" onClick={() => removeExistingPatient(p.id)} className="text-red-400 hover:text-red-600 bg-red-50 p-2 rounded-md"><Trash2 className="w-4 h-4" /></button>
+                    </div>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                      <div className="col-span-1 md:col-span-2">
+                        <label className="text-[10px] text-teal-600 font-bold block mb-0.5">カルテNo検索</label>
+                        <input type="text" list="patient-master-list" placeholder="番号で自動入力" value={p.chartNo || ''} onChange={(e) => handleExistingChartNoChange(p.id, e.target.value)} className="w-full p-3 text-sm border border-teal-300 rounded focus:border-teal-500 bg-teal-50" />
+                      </div>
+                      <div className="col-span-2 md:col-span-2">
+                        <label className="text-[10px] text-gray-500 block mb-0.5">購入プラン</label>
+                        <select value={p.plan} onChange={(e) => updateExistingPatient(p.id, 'plan', e.target.value)} className="w-full p-3 text-sm border rounded focus:border-blue-500 font-bold bg-gray-50">
+                          {PLAN_LIST.filter(plan => plan.name !== "未購入/保留").map(plan => <option key={plan.name} value={plan.name}>{plan.name}</option>)}
+                        </select>
+                      </div>
+                      <div className="col-span-2 md:col-span-4">
+                        <label className="text-[10px] text-blue-600 font-bold block mb-0.5">決済方法 (自動計算)</label>
+                        <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-md h-[44px]">
+                          <button type="button" onClick={() => updateExistingPatient(p.id, 'paymentMethod', 'cash')} className={`flex-1 h-full text-xs font-bold rounded ${p.paymentMethod === 'cash' ? 'bg-white shadow text-blue-800' : 'text-gray-500'}`}>現金</button>
+                          <button type="button" onClick={() => updateExistingPatient(p.id, 'paymentMethod', 'card')} className={`flex-1 h-full text-xs font-bold rounded ${p.paymentMethod === 'card' ? 'bg-white shadow text-blue-800' : 'text-gray-500'}`}>カード</button>
+                          <button type="button" onClick={() => updateExistingPatient(p.id, 'paymentMethod', 'paypay')} className={`flex-1 h-full text-xs font-bold rounded ${p.paymentMethod === 'paypay' ? 'bg-white shadow text-blue-800' : 'text-gray-500'}`}>PayPay</button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <button type="submit" disabled={isSyncing} className={`w-full font-bold py-4 px-4 rounded-xl shadow-md transition flex justify-center items-center gap-2 ${saveSuccess ? 'bg-emerald-500 text-white' : isExistingRecord ? 'bg-blue-600 hover:bg-blue-700 text-white' : 'bg-gray-800 hover:bg-gray-900 text-white'}`}>
+                {saveSuccess ? <><Check className="w-5 h-5" /> 保存しました</> : <><Save className="w-5 h-5" /> {isExistingRecord ? 'この内容でデータを更新する' : 'この内容で新しく記録する'}</>}
+              </button>
+            </form>
+          </div>
+
+          <div className="lg:col-span-5 bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden flex flex-col h-fit">
+            <div className="p-4 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
+              <h2 className="text-base font-bold text-gray-800 flex items-center gap-2"><Users className="w-4 h-4 text-teal-600" /> {selectedDate.substring(5).replace('-', '/')} の患者詳細</h2>
+            </div>
+            <div className="p-4 space-y-4">
+              {!isExistingRecord ? (
+                <div className="py-12 text-center text-gray-400">まだ入力されていません。</div>
+              ) : (
+                <>
+                  {currentRecord.newPatients.map(np => (
+                    <div key={np.id} className="p-3 rounded-lg border bg-gray-50 border-gray-200">
+                      <div className="flex justify-between items-start mb-2">
+                        <strong className="text-gray-900 text-sm">No.{np.chartNo || '-'} (新規)</strong>
+                        <span className="text-xs bg-white border px-2 py-0.5 rounded">{np.plan} / {np.paymentMethod==='card'?'💳':np.paymentMethod==='paypay'?'📱':'💴'}</span>
+                      </div>
+                    </div>
+                  ))}
+                  {currentRecord.existingDetails.map(ep => (
+                    <div key={ep.id} className="p-3 rounded-lg border bg-blue-50/50 border-blue-200">
+                      <div className="flex justify-between items-start mb-2">
+                        <strong className="text-blue-900 text-sm">No.{ep.chartNo || '-'} (既存)</strong>
+                        <span className="text-xs bg-white border px-2 py-0.5 rounded">{ep.plan} / {ep.paymentMethod==='card'?'💳':ep.paymentMethod==='paypay'?'📱':'💴'}</span>
+                      </div>
+                    </div>
+                  ))}
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderMonthlyTab = () => {
+    const totalAdSpend = Object.values(currentMarketing.adSpend || {}).reduce((sum, val) => sum + Number(val), 0);
+    const totalExpenses = Object.values(currentMarketing.expenses || {}).reduce((sum, val) => sum + Number(val), 0);
+    const netIncome = kpis.totalSales - kpis.totalFee - totalAdSpend - totalExpenses;
+
+    return (
+      <div className="space-y-6 animate-fade-in">
+        <div className="flex justify-between items-center">
+          <h2 className="text-xl font-bold text-gray-800">月次ダッシュボード</h2>
+          <button onClick={exportMoneyForwardCSV} className="text-xs bg-indigo-50 border border-indigo-200 text-indigo-700 hover:bg-indigo-100 px-4 py-2 rounded-lg font-bold shadow-sm flex items-center gap-2">
+            <Download className="w-4 h-4"/> MFクラウド仕訳出力
+          </button>
+        </div>
+
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 border-l-4 border-l-blue-600">
+          <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
+            <DollarSign className="w-5 h-5 text-blue-600" /> 今月の売上と利益サマリー
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-6 divide-y md:divide-y-0 md:divide-x divide-gray-100">
+            <div className="py-2 md:py-0 md:pr-4">
+              <p className="text-sm font-bold text-gray-500 mb-1">① 合計売上</p>
+              <p className="text-3xl font-black text-gray-800 tracking-tight">¥{kpis.totalSales.toLocaleString()}</p>
+              <div className="text-xs text-gray-500 mt-2 bg-gray-50 p-2 rounded flex flex-col gap-1 font-medium">
+                <span className="flex justify-between"><span>現金:</span> <span className="text-gray-800">¥{kpis.totalSalesCash.toLocaleString()}</span></span>
+                <span className="flex justify-between"><span>カード:</span> <span className="text-gray-800">¥{kpis.totalSalesCard.toLocaleString()}</span></span>
+                <span className="flex justify-between"><span>PayPay:</span> <span className="text-gray-800">¥{kpis.totalSalesPayPay.toLocaleString()}</span></span>
+              </div>
+            </div>
+            <div className="py-2 md:py-0 md:px-4">
+              <p className="text-sm font-bold text-red-500 mb-1">② 決済手数料</p>
+              <p className="text-3xl font-black text-red-500 tracking-tight">- ¥{kpis.totalFee.toLocaleString()}</p>
+              <p className="text-xs text-gray-500 mt-2 font-medium bg-red-50 p-2 rounded">
+                カード(2.5%)やPayPay(1.98%)で引かれる決済手数料の合計
+              </p>
+            </div>
+            <div className="py-2 md:py-0 md:px-4">
+              <p className="text-sm font-bold text-blue-600 mb-1">③ 営業利益 (手残り目安)</p>
+              <p className="text-3xl font-black text-blue-600 tracking-tight">¥{netIncome.toLocaleString()}</p>
+              <p className="text-xs text-gray-500 mt-2 font-medium bg-blue-50 p-2 rounded">
+                売上から手数料と「広告費・固定費（経費）」を引いた手残り額
+              </p>
+            </div>
+            <div className="py-2 md:py-0 md:pl-4">
+              <p className="text-sm font-bold text-emerald-600 mb-1">④ 消化売上 (提供価値)</p>
+              <p className="text-3xl font-black text-emerald-600 tracking-tight">¥{kpis.totalDigestedSales.toLocaleString()}</p>
+              <p className="text-xs text-gray-500 mt-2 font-medium bg-emerald-50 p-2 rounded text-emerald-800">
+                当月実際に施術した分の価値<br/>(院の本当の利益ベース)
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 border-t-4 border-t-emerald-500">
+            <p className="text-sm font-bold text-gray-500 mb-1">新規 成約率</p>
+            <p className="text-3xl font-black text-gray-800">{kpis.contractRate}%</p>
+            <p className="text-xs text-gray-500 mt-1 font-medium">{kpis.totalNew}人中 {kpis.totalContracts}人成約</p>
+          </div>
+          <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 border-t-4 border-t-purple-500">
+            <p className="text-sm font-bold text-gray-500 mb-1">ベッド稼働率</p>
+            <p className="text-3xl font-black text-gray-800">{kpis.occupancyRate}%</p>
+            <p className="text-xs text-gray-500 mt-1 font-medium">{kpis.totalSlots}枠中 {kpis.totalPatients}人来院</p>
+          </div>
+          <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 border-t-4 border-t-orange-500">
+            <p className="text-sm font-bold text-gray-500 mb-1">総来院数</p>
+            <p className="text-3xl font-black text-gray-800">{kpis.totalPatients} <span className="text-base font-bold text-gray-500">人</span></p>
+            <p className="text-xs text-gray-500 mt-1 font-medium">既存: {kpis.totalExisting} / 新規: {kpis.totalNew}</p>
+          </div>
+          <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 border-t-4 border-t-red-500">
+            <p className="text-sm font-bold text-gray-500 mb-1">総離脱者数</p>
+            <p className="text-3xl font-black text-gray-800">{kpis.totalDropouts} <span className="text-base font-bold text-gray-500">人</span></p>
+            <p className="text-xs text-gray-500 mt-1 font-medium">回数券中断・通院終了</p>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden flex flex-col">
+          <div className="p-4 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
+            <h2 className="text-base font-bold text-gray-800 flex items-center gap-2"><Calendar className="w-4 h-4 text-teal-600" /> 今月の日別データ一覧</h2>
+          </div>
+          <div className="overflow-x-auto p-0 flex-1">
+            <table className="w-full text-left text-sm text-gray-600 whitespace-nowrap">
+              <thead className="bg-white text-gray-700 border-b-2 border-gray-100 sticky top-0 z-10">
+                <tr>
+                  <th className="p-3 font-bold">日付</th>
+                  <th className="p-3 font-bold text-center">稼働</th>
+                  <th className="p-3 font-bold text-center">新規</th>
+                  <th className="p-3 font-bold text-right">売上(内訳)</th>
+                  <th className="p-3 font-bold text-right text-blue-600">純利益(手数料引)</th>
+                  <th className="p-3 font-bold text-center">詳細</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {filteredRecords.length === 0 ? (
+                  <tr><td colSpan="6" className="p-8 text-center text-gray-400">この月のデータはありません</td></tr>
+                ) : (
+                  filteredRecords.slice().reverse().map((r) => {
+                    const totalDaily = (r.newPatients?.length || 0) + r.existingPatients;
+                    const cash = r.salesCash || 0; const card = r.salesCard || 0; const paypay = r.salesPayPay || 0;
+                    const total = cash + card + paypay;
+                    return (
+                    <tr key={r.id} className="hover:bg-gray-50 transition">
+                      <td className="p-3 font-bold text-gray-900">{r.date.substring(5)}</td>
+                      <td className="p-3 text-center">{totalDaily}/{r.slots}</td>
+                      <td className="p-3 text-center font-bold text-teal-600">{r.newPatients?.length || 0}人</td>
+                      <td className="p-3 text-right">
+                        <span className="font-bold text-gray-800">¥{total.toLocaleString()}</span>
+                      </td>
+                      <td className="p-3 text-right font-black text-blue-600">¥{(total - (r.fee||0)).toLocaleString()}</td>
+                      <td className="p-3 text-center">
+                        <button onClick={() => jumpToDate(r.date)} className="text-teal-600 hover:text-white hover:bg-teal-600 px-3 py-1 rounded text-xs font-bold border border-teal-600 transition flex items-center gap-1 mx-auto">詳細 <ArrowRight className="w-3 h-3" /></button>
+                      </td>
+                    </tr>
+                  )})
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderMarketingTab = () => {
+    const mediaList = ['チラシ', 'HP', 'MEO', '紹介', 'その他'];
+    return (
+      <div className="space-y-6 animate-fade-in">
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+          <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2 border-b pb-2">
+            <MousePointerClick className="w-5 h-5 text-teal-600" /> 今月の広告費と固定費（経費）の入力
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <div className="space-y-4">
+              <h3 className="text-sm font-bold text-gray-500 flex items-center justify-between"><span>媒体別の広告費</span></h3>
+              <div className="space-y-2">
+                {mediaList.map(media => (
+                  <div key={media} className="flex items-center justify-between bg-white p-2 border-b border-gray-100">
+                    <label className="text-sm font-bold text-gray-700 w-20">{media}</label>
+                    <div className="flex items-center gap-2">
+                      <span className="text-gray-500 text-sm">¥</span>
+                      <input type="number" min="0" step="1000" value={currentMarketing.adSpend[media] || ''} onChange={(e) => updateMarketingData('adSpend', e.target.value, media)} className="w-28 p-2 border rounded text-right focus:border-teal-500 outline-none font-medium" placeholder="0" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="space-y-4">
+              <h3 className="text-sm font-bold text-gray-500 flex items-center justify-between"><span>固定費・その他の経費</span></h3>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between bg-white p-2 border-b border-gray-100">
+                  <label className="text-sm font-bold text-gray-700">家賃・テナント料</label>
+                  <div className="flex items-center gap-2">
+                    <span className="text-gray-500 text-sm">¥</span>
+                    <input type="number" min="0" step="1000" value={currentMarketing.expenses?.rent || ''} onChange={(e) => updateMarketingData('expenses', e.target.value, 'rent')} className="w-24 p-2 border rounded text-right focus:border-teal-500 outline-none font-medium" placeholder="0" />
+                  </div>
+                </div>
+                <div className="flex items-center justify-between bg-white p-2 border-b border-gray-100">
+                  <label className="text-sm font-bold text-gray-700 leading-tight">経費クレカ請求額</label>
+                  <div className="flex items-center gap-2">
+                    <span className="text-gray-500 text-sm">¥</span>
+                    <input type="number" min="0" step="1000" value={currentMarketing.expenses?.creditCard || ''} onChange={(e) => updateMarketingData('expenses', e.target.value, 'creditCard')} className="w-24 p-2 border rounded text-right focus:border-teal-500 outline-none font-medium" placeholder="0" />
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderAIPromptTab = () => {
+    const generateFinancePrompt = () => {
+      const [year, month] = currentMonth.split('-');
+      const totalAdSpend = Object.values(currentMarketing.adSpend || {}).reduce((sum, val) => sum + Number(val), 0);
+      const totalExpenses = Object.values(currentMarketing.expenses || {}).reduce((sum, val) => sum + Number(val), 0);
+      const netIncome = kpis.totalSales - kpis.totalFee - totalAdSpend - totalExpenses;
+
+      return `以下の月次財務データをもとに、整体院の「最適な資金配分」「節税対策」「資金繰り」に関するアドバイスをお願いします。
+
+【対象月】 ${year}年 ${parseInt(month, 10)}月
+
+【今月の簡易財務データ】
+- 合計売上：${kpis.totalSales.toLocaleString()}円
+  (うち回数券販売額：${kpis.totalTicketSales.toLocaleString()}円) ※未消化の前受金が含まれます
+- 今月の消化売上（実際の提供価値）：${kpis.totalDigestedSales.toLocaleString()}円
+
+[経費と利益の内訳]
+- 決済手数料：${kpis.totalFee.toLocaleString()}円
+- 広告費・販促費：${totalAdSpend.toLocaleString()}円
+- その他の経費（家賃・光熱費・消耗品など）：${totalExpenses.toLocaleString()}円
+- 営業利益（売上 - 手数料 - 広告費 - 経費）：${netIncome.toLocaleString()}円
+
+【相談したいこと】
+上記のデータ（特に現金売上と消化売上のバランス、そして実際の営業利益）を踏まえ、以下の項目について具体的な目安（金額やパーセンテージ）とアドバイスを提示してください。
+
+1. 役員報酬（または事業主の生活費）として引き出すべき安全な金額の目安
+2. 来月の事業投資・経費（広告費や設備など）として使える予算の目安
+3. 法人税・消費税（または所得税など）の支払い用として、絶対に手を付けず別口座に貯蓄しておくべき「納税準備金」の目安
+4. 整体院（回数券ビジネス）特有の「手元の現金」と「実際の利益」のズレから生じる、資金繰りの注意点（黒字倒産リスクの有無の判定）
+5. 利益が出ている場合に検討すべき、整体院におすすめの節税対策（小規模企業共済、倒産防止共済、機器投資など）
+
+★重要★
+回答の最後に、私（院長）がすぐに行動できるよう、今月の手元現金（合計売上）を以下の各口座に「いくらずつ振り分ければよいか（目安額）」を、箇条書きでわかりやすく指示してください。
+・給料口座（生活費）へ：〇〇円
+・税金用口座（納税準備金）へ：〇〇円
+・事業用口座（来月の経費・投資・プール金）へ：〇〇円`;
+    };
+
+    return (
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 animate-fade-in max-w-6xl mx-auto">
+        <div className="lg:col-span-12 bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex flex-col">
+          <div className="flex flex-col sm:flex-row sm:items-start justify-between mb-4 border-b border-gray-100 pb-3 gap-4">
+            <div className="flex items-start gap-3">
+              <div className="p-2 bg-teal-50 text-teal-600 rounded-lg"><Bot className="w-6 h-6" /></div>
+              <div>
+                <h2 className="text-lg font-bold text-gray-800">AI分析プロンプト生成</h2>
+                <p className="text-xs text-gray-500 mt-1">目的に応じてプロンプトを切り替え、AIに送信してください。</p>
+              </div>
+            </div>
+            <button onClick={() => { navigator.clipboard.writeText(generateFinancePrompt()); setCopied(true); setTimeout(() => setCopied(false), 2000); }} className={`flex items-center justify-center gap-2 px-6 py-2 rounded-lg font-bold text-sm transition-all shadow-sm ${copied ? 'bg-emerald-500 text-white' : 'bg-gray-800 hover:bg-gray-900 text-white'}`}>
+              {copied ? <><Check className="w-4 h-4" /> コピー完了</> : <><Copy className="w-4 h-4" /> コピーする</>}
+            </button>
+          </div>
+          <div className="relative flex-1">
+            <textarea readOnly value={generateFinancePrompt()} className="w-full h-full min-h-[400px] p-4 bg-gray-50 border border-gray-200 rounded-xl text-xs font-mono outline-none resize-none focus:ring-2 focus:ring-blue-500 text-blue-900" />
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderHelpTab = () => (
+    <div className="space-y-6 animate-fade-in max-w-4xl mx-auto">
+      <div className="bg-white p-8 rounded-xl shadow-sm border border-gray-100">
+        <div className="flex items-center gap-3 mb-6 border-b pb-4">
+          <div className="p-3 bg-teal-50 text-teal-600 rounded-xl"><BookOpen className="w-8 h-8" /></div>
+          <div>
+            <h2 className="text-2xl font-black text-gray-800">ダッシュボード 使い方ガイド</h2>
+            <p className="text-gray-500 mt-1">個人情報を保持しない、安全なSEO・マーケティング分析特化ダッシュボードの運用手順です。</p>
+          </div>
+        </div>
+
+        <div className="space-y-8">
+          <section>
+            <h3 className="text-lg font-bold text-teal-800 flex items-center gap-2 mb-3 bg-teal-50 p-2 rounded-lg"><span className="bg-teal-600 text-white w-6 h-6 rounded-full flex items-center justify-center text-sm">1</span> 毎日の業務（日次入力）</h3>
+            <div className="ml-8 space-y-3 text-sm text-gray-700">
+              <p>営業終了後に**「日次入力」タブ**を開き、その日の結果を入力します。</p>
+              <ul className="list-disc pl-5 space-y-2 text-gray-600 bg-gray-50 p-4 rounded-lg border border-gray-200">
+                <li><strong>稼働と既存：</strong> その日の「総予約枠数」と「既存の来院数」を数字で入れます。</li>
+                <li><strong>新規の記録：</strong> 「＋新規を追加」を押し、カルテNo、年代、症状などを記録します。<br/><span className="text-teal-600 font-bold">★SquareのカルテNoを入れておくことで、次回以降「既存の購入」で番号検索できるようになります。</span></li>
+                <li><strong>既存の購入：</strong> 既存患者が回数券の再購入や都度払いをした場合は、下の「＋購入者を追加」から記録します。</li>
+                <li><strong className="text-red-500">決済と売上：</strong> 患者情報のプランを選ぶと、一番上の「本日の売上」の「現金」に全額が仮入力されます。カードやPayPay決済があった場合は、患者カードの<span className="font-bold">「決済方法」ボタンをタップ</span>すると、自動で金額が振り分けられ手数料が計算されます。</li>
+                <li><strong>保存：</strong> 最後に必ず一番下の黒いボタン（記録する）を押して保存してください。</li>
+              </ul>
+            </div>
+          </section>
+
+          <section>
+            <h3 className="text-lg font-bold text-blue-800 flex items-center gap-2 mb-3 bg-blue-50 p-2 rounded-lg"><span className="bg-blue-600 text-white w-6 h-6 rounded-full flex items-center justify-center text-sm">2</span> 月末の業務（広告費・経費の入力）</h3>
+            <div className="ml-8 space-y-3 text-sm text-gray-700">
+              <p>月末（またはクレカの請求確定時）に、経費とデータのバックアップを行います。</p>
+              <ul className="list-disc pl-5 space-y-2 text-gray-600 bg-gray-50 p-4 rounded-lg border border-gray-200">
+                <li><strong>経費の入力：</strong> 「広告費・経費入力」タブを開き、今月使った広告費と、家賃・経費クレカの請求額などを入力します。<br/><span className="text-blue-600 font-bold">★経費を入力することで、AIが正確な「手残り（営業利益）」を計算し、節税アドバイスをしてくれます。</span></li>
+                <li><strong>MF仕訳CSV保存：</strong> 「月次サマリー」タブの右上にある「MFクラウド仕訳出力」ボタンを押すと、今月1ヶ月分のデータがマネーフォワードに取り込める形式でダウンロードされます。</li>
+              </ul>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="min-h-screen bg-gray-100 text-gray-800 font-sans p-2 md:p-6">
+      <div className="max-w-6xl mx-auto">
+        <header className="mb-6 px-2 flex justify-between items-center">
+          <h1 className="text-xl md:text-2xl font-black text-gray-800 flex items-center gap-2 tracking-tight">
+            <div className="bg-teal-600 p-1.5 rounded-lg text-white"><Activity className="w-5 h-5 md:w-6 md:h-6" /></div>
+            経営ダッシュボード <span className="text-xs md:text-sm font-medium text-gray-500 ml-2 border-l border-gray-300 pl-2 hidden sm:inline">整体院 専用</span>
+          </h1>
+          <button onClick={() => setShowResetModal(true)} className="text-xs text-gray-600 bg-white hover:bg-gray-50 px-3 py-2 rounded-lg flex items-center gap-1.5 transition font-bold border border-gray-200 shadow-sm">
+            <Settings className="w-4 h-4" /> データ管理
+          </button>
+        </header>
+        {renderTabNav()}
+        <main>
+          {activeTab === 'daily' && renderDailyTab()}
+          {activeTab === 'monthly' && renderMonthlyTab()}
+          {activeTab === 'marketing' && renderMarketingTab()}
+          {activeTab === 'ai' && renderAIPromptTab()}
+          {activeTab === 'help' && renderHelpTab()}
+        </main>
+      </div>
+
+      {showResetModal && (
+        <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden">
+            <div className="bg-red-50 p-6 border-b border-red-100 flex flex-col items-center text-center relative">
+              <button onClick={() => {setShowResetModal(false); setResetInput("");}} className="absolute top-4 right-4 text-gray-400 hover:text-gray-700">
+                <X className="w-5 h-5" />
+              </button>
+              <div className="bg-red-100 p-3 rounded-full mb-3 text-red-600">
+                <AlertTriangle className="w-8 h-8" />
+              </div>
+              <h2 className="text-xl font-black text-red-800">データの削除・リセット</h2>
+              <p className="text-sm text-red-600 mt-2 font-medium">
+                削除するデータの範囲を選択してください。
+              </p>
+            </div>
+            
+            <div className="p-6 space-y-5">
+              <div className="flex flex-col gap-2">
+                <label className="text-sm font-bold text-gray-700">1. 削除する範囲を選択</label>
+                <div className="grid grid-cols-3 gap-2">
+                  <button onClick={() => setResetType('daily')} className={`py-2 px-1 text-xs font-bold rounded-lg border transition ${resetType === 'daily' ? 'bg-red-600 text-white border-red-600' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}>
+                    この日<br/><span className="text-[10px] font-normal opacity-80">{selectedDate}</span>
+                  </button>
+                  <button onClick={() => setResetType('monthly')} className={`py-2 px-1 text-xs font-bold rounded-lg border transition ${resetType === 'monthly' ? 'bg-red-600 text-white border-red-600' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}>
+                    この月<br/><span className="text-[10px] font-normal opacity-80">{currentMonth}</span>
+                  </button>
+                  <button onClick={() => setResetType('all')} className={`py-2 px-1 text-xs font-bold rounded-lg border transition ${resetType === 'all' ? 'bg-gray-800 text-white border-gray-800' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}>
+                    全データ<br/><span className="text-[10px] font-normal opacity-80">初期化</span>
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-sm font-bold text-gray-700 mb-2 block">
+                  2. 確認のため <span className="text-red-600 bg-red-50 px-1 rounded">削除</span> と入力してください
+                </label>
+                <input type="text" value={resetInput} onChange={(e) => setResetInput(e.target.value)} placeholder="「削除」と入力" className="w-full p-3 border-2 border-gray-300 rounded-xl focus:border-red-500 outline-none text-center font-bold text-lg transition-colors" />
+              </div>
+            </div>
+
+            <div className="p-4 bg-gray-50 flex gap-3">
+              <button onClick={() => { setShowResetModal(false); setResetInput(""); setResetType('daily'); }} className="flex-1 py-3 bg-white border border-gray-300 rounded-xl font-bold text-gray-700 hover:bg-gray-100 transition">
+                キャンセル
+              </button>
+              <button onClick={handleResetExecute} disabled={resetInput !== "削除"} className={`flex-1 py-3 rounded-xl font-bold transition flex justify-center items-center gap-2 ${resetInput === "削除" ? "bg-red-600 hover:bg-red-700 text-white shadow-lg shadow-red-200" : "bg-gray-300 text-gray-500 cursor-not-allowed"}`}>
+                <Trash2 className="w-4 h-4" /> 実行する
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
